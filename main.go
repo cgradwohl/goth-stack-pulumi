@@ -39,16 +39,17 @@ func main() {
 						}).(pulumi.StringOutput),
 					},
 				},
-				Context:    pulumi.String("app/"),
+				Context:    pulumi.String("./"),
 				Dockerfile: pulumi.String("Dockerfile"),
 			},
 			ImageName: ecrRepository.RepositoryUrl.ApplyT(func(repositoryUrl string) (string, error) {
 				return fmt.Sprintf("%v:latest", repositoryUrl), nil
 			}).(pulumi.StringOutput),
 			Registry: &docker.RegistryArgs{
-				Password: pulumi.ToSecret(authToken.ApplyT(func(authToken ecr.GetAuthorizationTokenResult) (*string, error) {
+				Username: pulumi.String("AWS"),
+				Password: authToken.ApplyT(func(authToken ecr.GetAuthorizationTokenResult) (*string, error) {
 					return &authToken.Password, nil
-				}).(pulumi.StringPtrOutput)).(*pulumi.StringOutput),
+				}).(pulumi.StringPtrOutput).ToStringPtrOutput(),
 				Server: ecrRepository.RepositoryUrl,
 			},
 		})

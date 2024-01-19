@@ -5,6 +5,7 @@
 
 ## Pulumi
 - `pulumi new aws-go`
+- `brew update && brew upgrade pulumi`
 
 ### ECR
 - https://www.pulumi.com/registry/packages/aws/api-docs/ecr/
