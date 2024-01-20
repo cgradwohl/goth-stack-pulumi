@@ -1,3 +1,3 @@
-name: goth-stack-pulumi
+name: my-goth-fargate
 runtime: go
 description: A minimal AWS Go Pulumi program

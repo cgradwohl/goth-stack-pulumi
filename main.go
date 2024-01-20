@@ -106,7 +106,7 @@ func main() {
 		}
 
 		// Create ECR repository
-		ecrRepository, err := ecr.NewRepository(ctx, "goth-stack-repo", &ecr.RepositoryArgs{
+		ecrRepository, err := ecr.NewRepository(ctx, "my-ecr-repo", &ecr.RepositoryArgs{
 			Name: pulumi.String("goth-docker-repository"),
 			ImageScanningConfiguration: &ecr.RepositoryImageScanningConfigurationArgs{
 				ScanOnPush: pulumi.Bool(true),
@@ -123,7 +123,7 @@ func main() {
 
 		// Build the Docker image from local files
 		// Push the Docker image to ECR
-		image, err := docker.NewImage(ctx, "my-app-image", &docker.ImageArgs{
+		image, err := docker.NewImage(ctx, "my-image", &docker.ImageArgs{
 			Build: &docker.DockerBuildArgs{
 				Args: pulumi.StringMap{
 					"BUILDKIT_INLINE_CACHE": pulumi.String("1"),
@@ -165,7 +165,7 @@ func main() {
 		if err != nil {
 			return err
 		}
-		ecsCluster, err := ecs.NewCluster(ctx, "test", &ecs.ClusterArgs{
+		ecsCluster, err := ecs.NewCluster(ctx, "my-ecs-cluster", &ecs.ClusterArgs{
 			Configuration: &ecs.ClusterConfigurationArgs{
 				ExecuteCommandConfiguration: &ecs.ClusterConfigurationExecuteCommandConfigurationArgs{
 					// NOTE:Specify an AWS Key Management Service key ID to encrypt the data between the local client and the container. when should you do this?
@@ -184,7 +184,7 @@ func main() {
 
 		containerDefinition := image.ImageName.ApplyT(func(name string) (string, error) {
 			fmtstr := `[{
-				"name": "goth-app",
+				"name": "my-container-definition",
 				"image": %q,
 				"portMappings": [{
 					"containerPort": 80,
