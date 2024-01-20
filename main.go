@@ -137,6 +137,7 @@ func main() {
 				},
 				Context:    pulumi.String("./"),
 				Dockerfile: pulumi.String("Dockerfile"),
+				Platform:   pulumi.String("linux/arm64"),
 			},
 			ImageName: ecrRepository.RepositoryUrl.ApplyT(func(repositoryUrl string) (string, error) {
 				return fmt.Sprintf("%v:latest", repositoryUrl), nil
