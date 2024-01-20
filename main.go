@@ -38,6 +38,15 @@ func main() {
 			TargetType:    pulumi.String("ip"),
 			IpAddressType: pulumi.String("ipv4"),
 			VpcId:         vpc.VpcId,
+			HealthCheck: &lb.TargetGroupHealthCheckArgs{
+				HealthyThreshold:   pulumi.Int(2),
+				Interval:           pulumi.Int(10),
+				Path:               pulumi.String("/"),
+				Port:               pulumi.String("traffic-port"),
+				Protocol:           pulumi.String("HTTP"),
+				Timeout:            pulumi.Int(60),
+				UnhealthyThreshold: pulumi.Int(3),
+			},
 		})
 		if err != nil {
 			return err
@@ -182,6 +191,26 @@ func main() {
 			return err
 		}
 
+		// create the ECS task definition
+		// we can add log creation like this:
+		// fmtstr := `[{
+		// 	"name": "my-container-definition",
+		// 	"image": %q,
+		// 	"portMappings": [{
+		// 		"containerPort": 80,
+		// 		"hostPort": 80,
+		// 		"protocol": "tcp"
+		// 	}],
+		// 	"logConfiguration": {
+		// 		"logDriver": "awslogs",
+		// 		"options": {
+		// 			"awslogs-create-group": "true",
+		// 			"awslogs-group": "my-log-group",
+		// 			"awslogs-region": "us-east-1",
+		// 			"awslogs-stream-prefix": "goth-stack-pulumi"
+		// 		}
+		// 	}
+		// }]`
 		containerDefinition := image.ImageName.ApplyT(func(name string) (string, error) {
 			fmtstr := `[{
 				"name": "my-container-definition",
@@ -190,16 +219,7 @@ func main() {
 					"containerPort": 80,
 					"hostPort": 80,
 					"protocol": "tcp"
-				}],
-				"logConfiguration": {
-					"logDriver": "awslogs",
-					"options": {
-						"awslogs-create-group": "true",
-						"awslogs-group": "my-log-group",
-						"awslogs-region": "us-east-1",
-						"awslogs-stream-prefix": "goth-stack-pulumi"
-					}
-				}
+				}]
 			}]`
 			return fmt.Sprintf(fmtstr, name), nil
 		}).(pulumi.StringOutput)
@@ -240,7 +260,7 @@ func main() {
 			},
 			// I do no think we need this for now since this is the ARN of IAM role that allows your Amazon ECS container task to make calls to other AWS services.
 			// we probaly need this is we want to use AWS CloudWatch Logs logging driver?
-			// TaskRoleArn: ,
+			// TaskRoleArn:
 		})
 
 		_, err = ecs.NewService(ctx, "my-ecs-service", &ecs.ServiceArgs{
