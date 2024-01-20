@@ -45,8 +45,8 @@ func main() {
 
 		// create a SecurityGroup for the ALB
 		// permits HTTP ingress and unrestricted egress.
-		securityGroup, err := ec2.NewSecurityGroup(ctx, "allowTls", &ec2.SecurityGroupArgs{
-			Description: pulumi.String("Allow TLS inbound traffic"),
+		securityGroup, err := ec2.NewSecurityGroup(ctx, "my-security-group", &ec2.SecurityGroupArgs{
+			Description: pulumi.String("Allow HTTP traffic"),
 			VpcId:       vpc.VpcId,
 			Ingress: ec2.SecurityGroupIngressArray{
 				&ec2.SecurityGroupIngressArgs{
