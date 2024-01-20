@@ -3,13 +3,13 @@ package main
 import (
 	"fmt"
 
-	"github.com/pulumi/pulumi-aws-native/sdk/go/aws/ec2"
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/cloudwatch"
+	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/ec2"
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/ecr"
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/ecs"
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/iam"
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/lb"
-	awsx "github.com/pulumi/pulumi-awsx/sdk/v2/go/awsx/ec2"
+	ec2x "github.com/pulumi/pulumi-awsx/sdk/v2/go/awsx/ec2"
 	"github.com/pulumi/pulumi-docker/sdk/v4/go/docker"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
@@ -17,9 +17,10 @@ import (
 func main() {
 	pulumi.Run(func(ctx *pulumi.Context) error {
 		// create a vpc for the ALB
-		strategy := awsx.SubnetAllocationStrategy("Auto")
+		strategy := ec2x.SubnetAllocationStrategy("Auto")
 		vpcCidrBlock := "10.0.0.0/16"
-		vpc, err := awsx.NewVpc(ctx, "my-vpc", &awsx.VpcArgs{
+
+		vpc, err := ec2x.NewVpc(ctx, "vpc", &ec2x.VpcArgs{
 			EnableDnsHostnames: pulumi.Bool(true),
 			CidrBlock:          &vpcCidrBlock,
 			SubnetStrategy:     &strategy,
@@ -44,25 +45,28 @@ func main() {
 
 		// create a SecurityGroup for the ALB
 		// permits HTTP ingress and unrestricted egress.
-		securityGroup, err := ec2.NewSecurityGroup(ctx, "my-sg", &ec2.SecurityGroupArgs{
-			GroupDescription: pulumi.String("Enable HTTP access"),
-			GroupName:        pulumi.String("my-sg"),
-			VpcId:            vpc.VpcId,
-			SecurityGroupIngress: &ec2.SecurityGroupIngressTypeArray{
-				&ec2.SecurityGroupIngressTypeArgs{
-					IpProtocol: pulumi.String("tcp"),
-					FromPort:   pulumi.Int(80),
-					ToPort:     pulumi.Int(80),
+		securityGroup, err := ec2.NewSecurityGroup(ctx, "allowTls", &ec2.SecurityGroupArgs{
+			Description: pulumi.String("Allow TLS inbound traffic"),
+			VpcId:       vpc.VpcId,
+			Ingress: ec2.SecurityGroupIngressArray{
+				&ec2.SecurityGroupIngressArgs{
+					FromPort: pulumi.Int(80),
+					ToPort:   pulumi.Int(80),
+					Protocol: pulumi.String("tcp"),
 					// This option automatically adds the 0.0.0.0/0 IPv4 CIDR block as the source. This is acceptable for a short time in a test environment, but it's unsafe in production environments. In production, authorize only a specific IP address or range of addresses to access your instance.
-					CidrIp: pulumi.String("0.0.0.0/0"),
+					CidrBlocks: pulumi.StringArray{
+						pulumi.String("0.0.0.0/0"),
+					},
 				},
 			},
-			SecurityGroupEgress: &ec2.SecurityGroupEgressTypeArray{
-				&ec2.SecurityGroupEgressTypeArgs{
-					IpProtocol: pulumi.String("-1"),
-					FromPort:   pulumi.Int(0),
-					ToPort:     pulumi.Int(0),
-					CidrIp:     pulumi.String("0.0.0.0/0"),
+			Egress: ec2.SecurityGroupEgressArray{
+				&ec2.SecurityGroupEgressArgs{
+					FromPort: pulumi.Int(0),
+					ToPort:   pulumi.Int(0),
+					Protocol: pulumi.String("-1"),
+					CidrBlocks: pulumi.StringArray{
+						pulumi.String("0.0.0.0/0"),
+					},
 				},
 			},
 		})
@@ -78,7 +82,7 @@ func main() {
 			Name:             pulumi.String("my-alb"),
 			Subnets:          vpc.PublicSubnetIds,
 			SecurityGroups: pulumi.StringArray{
-				securityGroup.ID(),
+				securityGroup.ID().ToStringOutput(),
 			},
 		})
 		if err != nil {
@@ -246,7 +250,7 @@ func main() {
 			NetworkConfiguration: &ecs.ServiceNetworkConfigurationArgs{
 				AssignPublicIp: pulumi.Bool(true),
 				SecurityGroups: pulumi.StringArray{
-					securityGroup.ID(),
+					securityGroup.ID().ToStringOutput(),
 				},
 				Subnets: vpc.PublicSubnetIds,
 			},
