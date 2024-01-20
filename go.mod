@@ -7,7 +7,7 @@ require (
 	github.com/labstack/echo/v4 v4.11.4
 	github.com/pulumi/pulumi-aws/sdk/v6 v6.18.1
 	github.com/pulumi/pulumi-docker/sdk/v4 v4.5.1
-	github.com/pulumi/pulumi/sdk/v3 v3.101.1
+	github.com/pulumi/pulumi/sdk/v3 v3.102.0
 )
 
 require (
@@ -75,6 +75,7 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v5 v5.0.0 // indirect
 	github.com/sergi/go-diff v1.3.1 // indirect
 	github.com/skeema/knownhosts v1.2.1 // indirect
+	github.com/spf13/cast v1.4.1 // indirect
 	github.com/spf13/cobra v1.7.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stretchr/objx v0.5.0 // indirect

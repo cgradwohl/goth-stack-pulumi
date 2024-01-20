@@ -1,188 +1,78 @@
 package main
 
 import (
-	"fmt"
-
-	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/cloudwatch"
-	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/ec2"
-	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/ecr"
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/ecs"
-	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/iam"
-	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/lb"
-	ec2x "github.com/pulumi/pulumi-awsx/sdk/v2/go/awsx/ec2"
-	"github.com/pulumi/pulumi-docker/sdk/v4/go/docker"
+	"github.com/pulumi/pulumi-awsx/sdk/v2/go/awsx/ecr"
+	ecrx "github.com/pulumi/pulumi-awsx/sdk/v2/go/awsx/ecr"
+	ecsx "github.com/pulumi/pulumi-awsx/sdk/v2/go/awsx/ecs"
+	lbx "github.com/pulumi/pulumi-awsx/sdk/v2/go/awsx/lb"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
 )
 
 func main() {
 	pulumi.Run(func(ctx *pulumi.Context) error {
-		// create a vpc for the ALB
-		strategy := ec2x.SubnetAllocationStrategy("Auto")
-		vpcCidrBlock := "10.0.0.0/16"
+		cfg := config.New(ctx, "")
+		containerPort := 80
+		if param := cfg.GetInt("containerPort"); param != 0 {
+			containerPort = param
+		}
+		cpu := 512
+		if param := cfg.GetInt("cpu"); param != 0 {
+			cpu = param
+		}
+		memory := 128
+		if param := cfg.GetInt("memory"); param != 0 {
+			memory = param
+		}
 
-		vpc, err := ec2x.NewVpc(ctx, "vpc", &ec2x.VpcArgs{
-			EnableDnsHostnames: pulumi.Bool(true),
-			CidrBlock:          &vpcCidrBlock,
-			SubnetStrategy:     &strategy,
-		})
-
+		// An ECS cluster to deploy into
+		cluster, err := ecs.NewCluster(ctx, "cluster", nil)
 		if err != nil {
 			return err
 		}
 
-		// create a target group for the ALB
-		targetGroup, err := lb.NewTargetGroup(ctx, "my-target-group", &lb.TargetGroupArgs{
-			Port:     pulumi.Int(80),
-			Protocol: pulumi.String("HTTP"),
-			// If your service's task definition uses the awsvpc network mode (which is required for the Fargate launch type), you must choose IP addresses as the target type This is because tasks that use the awsvpc network mode are associated with an elastic network interface, not an Amazon EC2 instance.
-			TargetType:    pulumi.String("ip"),
-			IpAddressType: pulumi.String("ipv4"),
-			VpcId:         vpc.VpcId,
-			HealthCheck: &lb.TargetGroupHealthCheckArgs{
-				HealthyThreshold:   pulumi.Int(2),
-				Interval:           pulumi.Int(10),
-				Path:               pulumi.String("/"),
-				Port:               pulumi.String("traffic-port"),
-				Protocol:           pulumi.String("HTTP"),
-				Timeout:            pulumi.Int(60),
-				UnhealthyThreshold: pulumi.Int(3),
-			},
+		// An ALB to serve the container endpoint to the internet
+		loadbalancer, err := lbx.NewApplicationLoadBalancer(ctx, "loadbalancer", nil)
+		if err != nil {
+			return err
+		}
+
+		// An ECR repository to store our application's container image
+		repo, err := ecrx.NewRepository(ctx, "repo", &ecrx.RepositoryArgs{
+			ForceDelete: pulumi.Bool(true),
 		})
 		if err != nil {
 			return err
 		}
 
-		// create a SecurityGroup for the ALB
-		// permits HTTP ingress and unrestricted egress.
-		securityGroup, err := ec2.NewSecurityGroup(ctx, "my-security-group", &ec2.SecurityGroupArgs{
-			Description: pulumi.String("Allow HTTP traffic"),
-			VpcId:       vpc.VpcId,
-			Ingress: ec2.SecurityGroupIngressArray{
-				&ec2.SecurityGroupIngressArgs{
-					FromPort: pulumi.Int(80),
-					ToPort:   pulumi.Int(80),
-					Protocol: pulumi.String("tcp"),
-					// This option automatically adds the 0.0.0.0/0 IPv4 CIDR block as the source. This is acceptable for a short time in a test environment, but it's unsafe in production environments. In production, authorize only a specific IP address or range of addresses to access your instance.
-					CidrBlocks: pulumi.StringArray{
-						pulumi.String("0.0.0.0/0"),
-					},
-				},
-			},
-			Egress: ec2.SecurityGroupEgressArray{
-				&ec2.SecurityGroupEgressArgs{
-					FromPort: pulumi.Int(0),
-					ToPort:   pulumi.Int(0),
-					Protocol: pulumi.String("-1"),
-					CidrBlocks: pulumi.StringArray{
-						pulumi.String("0.0.0.0/0"),
-					},
-				},
-			},
+		// Build and publish our application's container image from ./app to the ECR repository
+		image, err := ecrx.NewImage(ctx, "image", &ecr.ImageArgs{
+			RepositoryUrl: repo.Url,
+			Context:       pulumi.String("./"),
+			Dockerfile:    pulumi.String("Dockerfile"),
+			Platform:      pulumi.String("linux/arm64"), //amd64 ?
 		})
 		if err != nil {
 			return err
 		}
 
-		// create ALB
-		alb, err := lb.NewLoadBalancer(ctx, "my-alb", &lb.LoadBalancerArgs{
-			Internal:         pulumi.Bool(false),
-			IpAddressType:    pulumi.String("ipv4"),
-			LoadBalancerType: pulumi.String("application"),
-			Name:             pulumi.String("my-alb"),
-			Subnets:          vpc.PublicSubnetIds,
-			SecurityGroups: pulumi.StringArray{
-				securityGroup.ID().ToStringOutput(),
-			},
-		})
-		if err != nil {
-			return err
-		}
-
-		// create ALB Listener
-		_, err = lb.NewListener(ctx, "my-alb-listener", &lb.ListenerArgs{
-			LoadBalancerArn: alb.Arn,
-			Port:            pulumi.Int(80),
-			Protocol:        pulumi.String("HTTP"),
-			DefaultActions: lb.ListenerDefaultActionArray{
-				&lb.ListenerDefaultActionArgs{
-					Type:           pulumi.String("forward"),
-					TargetGroupArn: targetGroup.Arn,
-				},
-			},
-		})
-		if err != nil {
-			return err
-		}
-
-		// Create ECR repository
-		ecrRepository, err := ecr.NewRepository(ctx, "my-ecr-repo", &ecr.RepositoryArgs{
-			Name: pulumi.String("goth-docker-repository"),
-			ImageScanningConfiguration: &ecr.RepositoryImageScanningConfigurationArgs{
-				ScanOnPush: pulumi.Bool(true),
-			},
-		})
-		if err != nil {
-			return err
-		}
-
-		// Create an auth token for the ECR repository
-		authToken := ecr.GetAuthorizationTokenOutput(ctx, ecr.GetAuthorizationTokenOutputArgs{
-			RegistryId: ecrRepository.RegistryId,
-		}, nil)
-
-		// Build the Docker image from local files
-		// Push the Docker image to ECR
-		image, err := docker.NewImage(ctx, "my-image", &docker.ImageArgs{
-			Build: &docker.DockerBuildArgs{
-				Args: pulumi.StringMap{
-					"BUILDKIT_INLINE_CACHE": pulumi.String("1"),
-				},
-				CacheFrom: &docker.CacheFromArgs{
-					Images: pulumi.StringArray{
-						ecrRepository.RepositoryUrl.ApplyT(func(repositoryUrl string) (string, error) {
-							return fmt.Sprintf("%v:latest", repositoryUrl), nil
-						}).(pulumi.StringOutput),
-					},
-				},
-				Context:    pulumi.String("./"),
-				Dockerfile: pulumi.String("Dockerfile"),
-				Platform:   pulumi.String("linux/arm64"),
-			},
-			ImageName: ecrRepository.RepositoryUrl.ApplyT(func(repositoryUrl string) (string, error) {
-				return fmt.Sprintf("%v:latest", repositoryUrl), nil
-			}).(pulumi.StringOutput),
-			Registry: &docker.RegistryArgs{
-				Username: pulumi.String("AWS"),
-				Password: authToken.ApplyT(func(authToken ecr.GetAuthorizationTokenResult) (*string, error) {
-					return &authToken.Password, nil
-				}).(pulumi.StringPtrOutput).ToStringPtrOutput(),
-				Server: ecrRepository.RepositoryUrl,
-			},
-		})
-		if err != nil {
-			return err
-		}
-
-		// exampleKey, err := kms.NewKey(ctx, "exampleKey", &kms.KeyArgs{
-		// 	Description:          pulumi.String("example"),
-		// 	DeletionWindowInDays: pulumi.Int(7),
-		// })
-		// if err != nil {
-		// 	return err
-		// }
-		logGroup, err := cloudwatch.NewLogGroup(ctx, "my-log-group", nil)
-		if err != nil {
-			return err
-		}
-		ecsCluster, err := ecs.NewCluster(ctx, "my-ecs-cluster", &ecs.ClusterArgs{
-			Configuration: &ecs.ClusterConfigurationArgs{
-				ExecuteCommandConfiguration: &ecs.ClusterConfigurationExecuteCommandConfigurationArgs{
-					// NOTE:Specify an AWS Key Management Service key ID to encrypt the data between the local client and the container. when should you do this?
-					// KmsKeyId: exampleKey.Arn,
-					Logging: pulumi.String("OVERRIDE"),
-					LogConfiguration: &ecs.ClusterConfigurationExecuteCommandConfigurationLogConfigurationArgs{
-						CloudWatchEncryptionEnabled: pulumi.Bool(true),
-						CloudWatchLogGroupName:      logGroup.Name,
+		// Deploy an ECS Service on Fargate to host the application container
+		_, err = ecsx.NewFargateService(ctx, "service", &ecsx.FargateServiceArgs{
+			Cluster:        cluster.Arn,
+			AssignPublicIp: pulumi.Bool(true),
+			TaskDefinitionArgs: &ecsx.FargateServiceTaskDefinitionArgs{
+				Container: &ecsx.TaskDefinitionContainerDefinitionArgs{
+					Name:      pulumi.String("app"),
+					Image:     image.ImageUri,
+					Cpu:       pulumi.Int(cpu),
+					Memory:    pulumi.Int(memory),
+					Essential: pulumi.Bool(true),
+					PortMappings: ecsx.TaskDefinitionPortMappingArray{
+						&ecsx.TaskDefinitionPortMappingArgs{
+							ContainerPort: pulumi.Int(containerPort),
+							TargetGroup:   loadbalancer.DefaultTargetGroup,
+						},
 					},
 				},
 			},
@@ -191,97 +81,8 @@ func main() {
 			return err
 		}
 
-		// create the ECS task definition
-		// we can add log creation like this:
-		// fmtstr := `[{
-		// 	"name": "my-container-definition",
-		// 	"image": %q,
-		// 	"portMappings": [{
-		// 		"containerPort": 80,
-		// 		"hostPort": 80,
-		// 		"protocol": "tcp"
-		// 	}],
-		// 	"logConfiguration": {
-		// 		"logDriver": "awslogs",
-		// 		"options": {
-		// 			"awslogs-create-group": "true",
-		// 			"awslogs-group": "my-log-group",
-		// 			"awslogs-region": "us-east-1",
-		// 			"awslogs-stream-prefix": "goth-stack-pulumi"
-		// 		}
-		// 	}
-		// }]`
-		containerDefinition := image.ImageName.ApplyT(func(name string) (string, error) {
-			fmtstr := `[{
-				"name": "my-container-definition",
-				"image": %q,
-				"portMappings": [{
-					"containerPort": 80,
-					"hostPort": 80,
-					"protocol": "tcp"
-				}]
-			}]`
-			return fmt.Sprintf(fmtstr, name), nil
-		}).(pulumi.StringOutput)
-
-		// create the ECS task execution IAM role (trust policy)
-		// the task execution role grants the Amazon ECS container and Fargate agents permission to make AWS API calls on your behalf.
-		//  this is required for things like pulling from ECR, logging to CloudWatch, etc.
-		taskExecutionRole, err := iam.NewRole(ctx, "my-task-exec-role", &iam.RoleArgs{
-			AssumeRolePolicy: pulumi.String(`{
-					"Version": "2012-10-17",
-					"Statement": [
-							{
-									"Effect": "Allow",
-									"Principal": {
-											"Service": "ecs-tasks.amazonaws.com"
-									},
-									"Action": "sts:AssumeRole"
-							}
-					]
-			}`),
-		})
-
-		// attach the AWS managed policy (AmazonECSTaskExecutionRolePolicy) for Fargate to the task execution role
-		_, err = iam.NewRolePolicyAttachment(ctx, "my-role-attachment", &iam.RolePolicyAttachmentArgs{
-			Role:      taskExecutionRole.Name,
-			PolicyArn: pulumi.String("arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"),
-		})
-
-		ecsTask, err := ecs.NewTaskDefinition(ctx, "my-ecs-task", &ecs.TaskDefinitionArgs{
-			ContainerDefinitions: containerDefinition,
-			Cpu:                  pulumi.String("256"),
-			ExecutionRoleArn:     taskExecutionRole.Arn,
-			Family:               pulumi.String("goth-task"),
-			Memory:               pulumi.String("512"),
-			NetworkMode:          pulumi.String("awsvpc"),
-			RequiresCompatibilities: pulumi.StringArray{
-				pulumi.String("FARGATE"),
-			},
-			// I do no think we need this for now since this is the ARN of IAM role that allows your Amazon ECS container task to make calls to other AWS services.
-			// we probaly need this is we want to use AWS CloudWatch Logs logging driver?
-			// TaskRoleArn:
-		})
-
-		_, err = ecs.NewService(ctx, "my-ecs-service", &ecs.ServiceArgs{
-			Cluster:        ecsCluster.Arn,
-			DesiredCount:   pulumi.Int(1),
-			LaunchType:     pulumi.String("FARGATE"),
-			TaskDefinition: ecsTask.Arn,
-			NetworkConfiguration: &ecs.ServiceNetworkConfigurationArgs{
-				AssignPublicIp: pulumi.Bool(true),
-				SecurityGroups: pulumi.StringArray{
-					securityGroup.ID().ToStringOutput(),
-				},
-				Subnets: vpc.PublicSubnetIds,
-			},
-		})
-		if err != nil {
-			return err
-		}
-
-		// Pulumi Exports
-		ctx.Export("url", alb.DnsName)
+		// The URL at which the container's HTTP endpoint will be available
+		ctx.Export("url", pulumi.Sprintf("http://%s", loadbalancer.LoadBalancer.DnsName()))
 		return nil
 	})
 }
