@@ -247,7 +247,7 @@ func main() {
 			Cluster:        ecsCluster.Arn,
 			DesiredCount:   pulumi.Int(1),
 			LaunchType:     pulumi.String("FARGATE"),
-			TaskDefinition: ecsTask.TaskRoleArn,
+			TaskDefinition: ecsTask.Arn,
 			NetworkConfiguration: &ecs.ServiceNetworkConfigurationArgs{
 				AssignPublicIp: pulumi.Bool(true),
 				SecurityGroups: pulumi.StringArray{
